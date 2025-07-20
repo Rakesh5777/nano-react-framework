@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NanoReact - Supporting Multiple Components</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 py-12">
+    <div class="flex flex-col md:flex-row gap-8 justify-center items-start">
+        <!-- Containers for our two independent components -->
+        <div id="root1" class="w-full max-w-md mx-auto"></div>
+        <div id="root2" class="w-full max-w-md mx-auto"></div>
+    </div>
+
+    <script type="module">
+        // --- NANO-REACT FRAMEWORK ---
+        const NanoReact = (() => {
+            // **THE FIX**: We now have a Map to store state for each component instance.
+            // The key will be the component's container element.
+            let componentStates = new Map();
+            let currentlyRenderingComponent = null; // Track which component is rendering
+
+            /**
+             * The useState hook implementation.
+             */
+            function useState(initialValue) {
+                // Get the state object for the component that is currently rendering.
+                const state = componentStates.get(currentlyRenderingComponent);
+                
+                const hookIndex = state.hookIndex;
+                if (state.hooks[hookIndex] === undefined) {
+                    state.hooks[hookIndex] = initialValue;
+                }
+
+                const currentIndex = hookIndex;
+                // The closure now captures the component's identity (`currentlyRenderingComponent`).
+                const componentId = currentlyRenderingComponent; 
+                const setState = (action) => {
+                    const componentState = componentStates.get(componentId);
+                    const oldValue = componentState.hooks[currentIndex];
+                    const newValue = typeof action === 'function' ? action(oldValue) : action;
+                    componentState.hooks[currentIndex] = newValue;
+                    
+                    // Re-render only the specific component that was updated.
+                    render(componentId.Component, componentId);
+                };
+
+                state.hookIndex++;
+                return [state.hooks[hookIndex], setState];
+            }
+
+            /**
+             * The useEffect hook implementation.
+             */
+            function useEffect(callback, depArray) {
+                const state = componentStates.get(currentlyRenderingComponent);
+                const hookIndex = state.hookIndex;
+                const oldHookData = state.hooks[hookIndex];
+                const oldDeps = oldHookData ? oldHookData.deps : undefined;
+                let hasChanged = true;
+
+                if (oldDeps) {
+                    hasChanged = depArray.some((dep, i) => !Object.is(dep, oldDeps[i]));
+                }
+
+                if (hasChanged) {
+                    if (oldHookData && oldHookData.cleanup) {
+                        oldHookData.cleanup();
+                    }
+                    const newCleanup = callback();
+                    state.hooks[hookIndex] = { deps: depArray, cleanup: newCleanup };
+                }
+                
+                state.hookIndex++;
+            }
+
+            /**
+             * Renders a component into a container.
+             */
+            function render(Component, container) {
+                console.group(`%c--- RENDER START for ${container.id} ---`, 'color: #9C27B0; font-weight: bold; font-size: 14px;');
+
+                // **THE FIX**: Set which component is the "current" one.
+                currentlyRenderingComponent = container;
+
+                // If this is the first time we see this component, initialize its state storage.
+                if (!componentStates.has(container)) {
+                    console.log(`Initializing state for ${container.id}`);
+                    componentStates.set(container, {
+                        hooks: [],
+                    });
+                    // Also attach the component function to the container for re-renders.
+                    container.Component = Component;
+                }
+                
+                // Reset the hook index *for this specific component*.
+                componentStates.get(container).hookIndex = 0;
+
+                const output = Component();
+                container.innerHTML = output;
+
+                // Unset the current component after rendering is done.
+                currentlyRenderingComponent = null; 
+                console.groupEnd();
+            }
+
+            return { useState, useEffect, render };
+        })();
+
+
+        // --- APPLICATION CODE ---
+        const { useState, useEffect, render } = NanoReact;
+
+        // We'll use a slightly better way to manage setters for multiple components.
+        const App = { setters: {} };
+
+        // --- Component 1 ---
+        function Counter1() {
+            const [count, setCount] = useState(0);
+            App.setters.setCount1 = setCount;
+            return `
+                <div class="card text-center space-y-4">
+                    <h1 class="text-2xl font-bold text-gray-800">Component One</h1>
+                    <p class="text-6xl font-bold text-blue-600">${count}</p>
+                    <button onclick="window.increment1()" class="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700">
+                        Increment C1
+                    </button>
+                </div>
+            `;
+        }
+
+        // --- Component 2 ---
+        function Counter2() {
+            const [count, setCount] = useState(100);
+            const [text, setText] = useState("Nano");
+
+            App.setters.setCount2 = setCount;
+            App.setters.setText2 = setText;
+
+            return `
+                <div class="card text-center space-y-4">
+                    <h1 class="text-2xl font-bold text-gray-800">Component Two</h1>
+                    <p class="text-6xl font-bold text-teal-600">${count}</p>
+                    <p class="text-xl font-medium text-gray-500">${text}</p>
+                    <button onclick="window.decrement2()" class="w-full px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700">
+                        Decrement C2
+                    </button>
+                     <input 
+                        type="text" 
+                        value="${text}" 
+                        oninput="window.changeText2(this.value)" 
+                        class="mt-2 w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    />
+                </div>
+            `;
+        }
+
+        // --- Event Handlers for each component ---
+        window.increment1 = () => App.setters.setCount1(c => c + 1);
+        window.decrement2 = () => App.setters.setCount2(c => c - 1);
+        window.changeText2 = (newText) => App.setters.setText2(newText);
+
+        // --- Initial Render for both components ---
+        render(Counter1, document.getElementById('root1'));
+        render(Counter2, document.getElementById('root2'));
+    </script>
+</body>
+</html>
+
